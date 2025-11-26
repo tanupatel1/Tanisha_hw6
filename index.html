@@ -146,7 +146,7 @@ Please copy your edits to the source code if you want to save them, as the playg
     Sphere lightSphere;
     Cube cube;
 
-    // Initialize scene objects
+       // Initialize scene objects
     void initScene(float time) {
         // Light sphere - bright white light source
         lightSphere = Sphere(
@@ -158,27 +158,31 @@ Please copy your edits to the source code if you want to save them, as the playg
             1.0
         );
 
-        //cube - reflective mirror-like surface
-        cube = Cube(
-            vec3(0.0, 1.0, 1.0),
-            vec3(2.0, 0.2, 2.0),
-            vec3(0.9, 1.8, 0.9),
-            0.8
-        );
+        // Cube - reflective mirror-like surface, moving up and down
+    cube = Cube(
+        vec3(0.1, 0.1 * sin(time), -2.0), // Y moves up/down with amplitude 0.5
+        vec3(1., 0.8, 0.0),               // all sides equal
+        vec3(0.2, 0.5, 1.0),               // color
+        0.8
+    );
 
-        // Sphere 1 - Glass-like refractive sphere
-spheres[0] = Sphere(
-    vec3(-1.0 + sin(time * 0.5) * 0.3, 0.0, -2.0),
-    0.6,
+
+      spheres[0] = Sphere(
+    vec3(-1.5 + cos(time * 0.5) * 0.3, -0.2, -2.0),
+    0.5,
     vec3(0.95, 0.95, 1.0),
     MATERIAL_REFRACTIVE,
     0.95,
-    1.5
+    0.0
 );
+     
+
+     
+
 
         // Sphere 2 - Diffuse colored sphere
         spheres[1] = Sphere(
-            vec3(1.2 + cos(time * 0.7) * 0.3, -0.2, -1.5),
+            vec3(1.5 + cos(time * 0.7) * 0.3, -0.2, -1.5),
             0.5,
             vec3(0.8, 0.3, 0.3),
             MATERIAL_DIFFUSE,
@@ -186,7 +190,6 @@ spheres[0] = Sphere(
             1.0
         );
     }
-
     bool intersectSphere(Ray ray, Sphere sphere, out float t) {
         vec3 oc = ray.origin - sphere.center;
         float a = dot(ray.direction, ray.direction);
@@ -350,9 +353,10 @@ spheres[0] = Sphere(
 
             vec3 lightDir = normalize(lightSphere.center - hit.point);
             float lightDist = length(lightSphere.center - hit.point);
+            
 
             // Shadow ray
-            Ray shadowRay = Ray(hit.point + hit.normal * 0.001, lightDir);
+            Ray shadowRay = Ray(hit.point + hit.normal * 0.008, lightDir);
             HitData shadowHit = traceScene(shadowRay, false);
             bool inShadow = shadowHit.hit && shadowHit.t < lightDist;
 
@@ -374,26 +378,43 @@ spheres[0] = Sphere(
                 break;
 
             } else if (hit.material == MATERIAL_REFRACTIVE) {
-                float eta = hit.frontFace ? (1.0 / hit.refractiveIndex) : hit.refractiveIndex;
-                vec3 refracted = refraction(ray.direction, hit.normal, eta);
-                bool total_internel_reflectioin = length(refracted) < 0.01;
-                
-                float cosine = hit.frontFace ? 
-                    -dot(ray.direction, hit.normal) : 
-                    dot(ray.direction, hit.normal);
-                float schlick_value = schlick(cosine, hit.refractiveIndex);
-                
-                vec3 direction;
-                if (total_internel_reflectioin || schlick_value > 0.5) {
-                    //direction = reflection ray
-                    direction = reflect(ray.direction, hit.normal);
-                } else {
-                    //direction = refraction ray
-                    direction = refracted;
-                }
 
-                ray = Ray(hit.point + direction * 0.001, direction);
-                attenuation *= hit.color;
+    // Determine entering or exiting
+    float etai = 1.0;
+    float etat = hit.refractiveIndex;
+    vec3 n = hit.normal;
+    float cosi = clamp(dot(ray.direction, n), -1.0, 1.0);
+
+    if (cosi > 0.0) {
+        // we are inside the object
+        n = -n;
+        float tmp = etai;
+        etai = etat;
+        etat = tmp;
+    }
+    float eta = etai / etat;
+
+    // Compute refraction
+    float k = 1.0 - eta * eta * (1.0 - cosi * cosi);
+    bool tir = (k < 0.0);
+
+    vec3 reflectDir = normalize(reflect(ray.direction, n));
+    vec3 refractDir = tir ? vec3(0.0) :
+        normalize(eta * ray.direction - (eta * cosi + sqrt(k)) * n);
+
+    // Fresnel term using Schlick
+    float cosine = abs(cosi);
+    float Fr = schlick(cosine, etat);
+
+    // Blend reflection/refraction unless TIR
+    vec3 newDir = tir ? reflectDir :
+        normalize(mix(refractDir, reflectDir, Fr));
+
+    // Move ray forward to avoid acne
+    ray = Ray(hit.point + newDir * 0.001, newDir);
+
+    // Glass should not accumulate darkness
+    attenuation *= vec3(1.0);
 
             } else {
                 // Reflective material
