@@ -40,10 +40,11 @@
         }
         .controls {
             margin-top: 10px;
-            color: #ccc;
         }
-        .controls label { display:block; margin:6px 0; }
-        .control-row { display:flex; gap:10px; align-items:center; margin:6px 0; }
+        .controls label {
+            display: block;
+            margin: 5px 0;
+        }
     </style>
 </head>
 <body>
@@ -55,7 +56,16 @@ Please copy your edits to the source code if you want to save them, as the playg
 <div class="container">
     <div class="canvas-container">
         <canvas id="glCanvas" width="800" height="600"></canvas>
-        <div id="controls" class="controls"></div>
+        <div class="controls">
+            <label>
+                Max Bounces: <span id="bouncesValue">4</span>
+                <input type="range" id="bouncesSlider" min="1" max="8" value="4" step="1">
+            </label>
+            <label>
+                Ambient Strength: <span id="ambientValue">0.25</span>
+                <input type="range" id="ambientSlider" min="0" max="1" value="0.25" step="0.05">
+            </label>
+        </div>
     </div>
     <div class="editor-panel">
          <div>
@@ -136,94 +146,97 @@ Please copy your edits to the source code if you want to save them, as the playg
     Sphere lightSphere;
     Cube cube;
 
-    // Initialize scene objects (colors chosen: sphere1 red, sphere2 blue, cube green, light white)
+    // Initialize scene objects
     void initScene(float time) {
-        // Light sphere (moves slightly)
+        // Light sphere - bright white light source
         lightSphere = Sphere(
-            vec3(0.0 + 0.8*sin(time*0.9), 1.8 + 0.3*cos(time*0.6), -1.0),
-            0.12,
-            vec3(1.0, 0.98, 0.9),
+            vec3(sin(time) * 2.0, 2.0, cos(time) * 2.0 - 1.0),
+            0.3,
+            vec3(10.0, 10.0, 8.0),
             MATERIAL_DIFFUSE,
             0.0,
             1.0
         );
 
-        // cube (green, reflective) — slab method uses center & size
+        //cube - reflective mirror-like surface
         cube = Cube(
-            vec3(-0.9 + 0.6*sin(time*0.7), -0.6, -3.0 + 0.2*cos(time*0.5)),
-            vec3(1.0, 1.0, 1.0),
-            vec3(0.2, 0.9, 0.3),
-            0.85
+            vec3(0.0, 1.0, 1.0),
+            vec3(2.0, 0.2, 2.0),
+            vec3(0.9, 1.8, 0.9),
+            0.8
         );
 
-        // Sphere 1 (diffuse red) — moving
-        spheres[0] = Sphere(
-            vec3(1.2 * cos(time*0.8), 0.1 * sin(time*1.2), -3.2 + 0.3*sin(time*0.7)),
-            0.55,
-            vec3(0.9, 0.25, 0.2),
+        // Sphere 1 - Glass-like refractive sphere
+spheres[0] = Sphere(
+    vec3(-1.0 + sin(time * 0.5) * 0.3, 0.0, -2.0),
+    0.6,
+    vec3(0.95, 0.95, 1.0),
+    MATERIAL_REFRACTIVE,
+    0.95,
+    1.5
+);
+
+        // Sphere 2 - Diffuse colored sphere
+        spheres[1] = Sphere(
+            vec3(1.2 + cos(time * 0.7) * 0.3, -0.2, -1.5),
+            0.5,
+            vec3(0.8, 0.3, 0.3),
             MATERIAL_DIFFUSE,
             0.0,
             1.0
-        );
-
-        // Sphere 2 (refractive blue)
-        spheres[1] = Sphere(
-            vec3(0.4, 0.25*sin(time*1.3), -2.0 + 0.4*cos(time*0.6)),
-            0.45,
-            vec3(0.25, 0.55, 0.95),
-            MATERIAL_REFRACTIVE,
-            0.05,
-            1.5
         );
     }
 
-    // Ray-sphere intersection 
     bool intersectSphere(Ray ray, Sphere sphere, out float t) {
         vec3 oc = ray.origin - sphere.center;
         float a = dot(ray.direction, ray.direction);
         float b = 2.0 * dot(oc, ray.direction);
         float c = dot(oc, oc) - sphere.radius * sphere.radius;
-        float disc = b*b - 4.0*a*c;
-        if (disc < 0.0) return false;
-        float sqrtD = sqrt(disc);
-        float t0 = (-b - sqrtD) / (2.0 * a);
-        float t1 = (-b + sqrtD) / (2.0 * a);
-        float eps = 1e-4;
-        if (t0 > eps) { t = t0; return true; }
-        if (t1 > eps) { t = t1; return true; }
+        float discriminant = b * b - 4.0 * a * c;
+        
+        if (discriminant < 0.0) {
+            return false;
+        }
+        
+        float t1 = (-b - sqrt(discriminant)) / (2.0 * a);
+        float t2 = (-b + sqrt(discriminant)) / (2.0 * a);
+        
+        if (t1 > 0.001) {
+            t = t1;
+            return true;
+        }
+        if (t2 > 0.001) {
+            t = t2;
+            return true;
+        }
+        
         return false;
     }
 
-    // Ray-cube intersection 
     bool intersectCube(Ray ray, out float t, out vec3 normal) {
-        vec3 minB = cube.center - cube.size * 0.5;
-        vec3 maxB = cube.center + cube.size * 0.5;
-
-        // avoid divide by zero — use large value when direction is near zero
-        vec3 dir = ray.direction;
-        vec3 invDir = vec3(1.0) / dir;
-        invDir = mix(invDir, vec3(1e8), lessThan(abs(dir), vec3(1e-6)));
-
-        vec3 t0s = (minB - ray.origin) * invDir;
-        vec3 t1s = (maxB - ray.origin) * invDir;
-
-        vec3 tsm = min(t0s, t1s);
-        vec3 tb  = max(t0s, t1s);
-
-        float tmin = max(max(tsm.x, tsm.y), tsm.z);
-        float tmax = min(min(tb.x, tb.y), tb.z);
-
-        if (tmax < 0.0 || tmin > tmax) return false;
-
-        t = (tmin > 1e-4) ? tmin : tmax;
-        vec3 hitP = ray.origin + ray.direction * t;
-        vec3 d = hitP - cube.center;
-        vec3 ad = abs(d);
-
-        if (ad.x >= ad.y && ad.x >= ad.z) normal = vec3(sign(d.x), 0.0, 0.0);
-        else if (ad.y >= ad.z) normal = vec3(0.0, sign(d.y), 0.0);
-        else normal = vec3(0.0, 0.0, sign(d.z));
-
+        vec3 m = 1.0 / ray.direction;
+        vec3 n = m * (ray.origin - cube.center);
+        vec3 k = abs(m) * cube.size;
+        
+        vec3 t1 = -n - k;
+        vec3 t2 = -n + k;
+        
+        float tN = max(max(t1.x, t1.y), t1.z);
+        float tF = min(min(t2.x, t2.y), t2.z);
+        
+        if (tN > tF || tF < 0.001) {
+            return false;
+        }
+        
+        t = tN > 0.001 ? tN : tF;
+        
+        if (t == t1.x) normal = vec3(-sign(ray.direction.x), 0.0, 0.0);
+        else if (t == t1.y) normal = vec3(0.0, -sign(ray.direction.y), 0.0);
+        else if (t == t1.z) normal = vec3(0.0, 0.0, -sign(ray.direction.z));
+        else if (t == t2.x) normal = vec3(sign(ray.direction.x), 0.0, 0.0);
+        else if (t == t2.y) normal = vec3(0.0, sign(ray.direction.y), 0.0);
+        else normal = vec3(0.0, 0.0, sign(ray.direction.z));
+        
         return true;
     }
 
@@ -232,26 +245,21 @@ Please copy your edits to the source code if you want to save them, as the playg
         HitData closest;
         closest.hit = false;
         closest.t = 1e10;
-        closest.reflectivity = 0.0;
-        closest.refractiveIndex = 1.0;
-        closest.color = vec3(0.0);
-        closest.material = -1;
-        closest.frontFace = true;
 
         // Light sphere intersection
         if (includeLightSphere) {
-            float tL;
-            if (intersectSphere(ray, lightSphere, tL)) {
-                if (tL < closest.t) {
+            float t;
+            if (intersectSphere(ray, lightSphere, t)) {
+                if (t < closest.t) {
                     closest.hit = true;
-                    closest.t = tL;
-                    closest.point = ray.origin + ray.direction * tL;
+                    closest.t = t;
+                    closest.point = ray.origin + ray.direction * t;
                     closest.normal = normalize(closest.point - lightSphere.center);
                     closest.color = lightSphere.color;
                     closest.material = lightSphere.material;
-                    closest.reflectivity = 0.0;
-                    closest.refractiveIndex = 1.0;
-                    closest.frontFace = true;
+                    closest.reflectivity = lightSphere.reflectivity;
+                    closest.refractiveIndex = lightSphere.refractiveIndex;
+                    closest.frontFace = dot(ray.direction, closest.normal) < 0.0;
                 }
             }
         }
@@ -275,122 +283,122 @@ Please copy your edits to the source code if you want to save them, as the playg
 
         // Sphere intersections
         for (int i = 0; i < 2; i++) {
-            float tS;
-            if (intersectSphere(ray, spheres[i], tS)) {
-                if (tS < closest.t) {
+            float t;
+            if (intersectSphere(ray, spheres[i], t)) {
+                if (t < closest.t) {
                     closest.hit = true;
-                    closest.t = tS;
-                    closest.point = ray.origin + ray.direction * tS;
+                    closest.t = t;
+                    closest.point = ray.origin + ray.direction * t;
                     closest.normal = normalize(closest.point - spheres[i].center);
                     closest.color = spheres[i].color;
                     closest.material = spheres[i].material;
                     closest.reflectivity = spheres[i].reflectivity;
                     closest.refractiveIndex = spheres[i].refractiveIndex;
                     closest.frontFace = dot(ray.direction, closest.normal) < 0.0;
+                    if (!closest.frontFace) {
+                        closest.normal = -closest.normal;
+                    }
                 }
             }
         }
         return closest;
     }
 
-    // refraction (lecture-style; returns zero vec on TIR)
+    // refraction
     vec3 refraction(vec3 I, vec3 N, float eta) {
-        float cosi = clamp(-dot(I, N), -1.0, 1.0);
-        float k = 1.0 - eta * eta * (1.0 - cosi * cosi);
-        if (k < 0.0) return vec3(0.0); // total internal reflection
-        return normalize(eta * I + (eta * cosi - sqrt(k)) * N);
+        float cosI = -dot(N, I);
+        float sinT2 = eta * eta * (1.0 - cosI * cosI);
+        if (sinT2 > 1.0) {
+            return vec3(0.0);
+        }
+        float cosT = sqrt(1.0 - sinT2);
+        return eta * I + (eta * cosI - cosT) * N;
     }
 
     // Schlick approximation
     float schlick(float cosine, float ref_idx) {
         float r0 = (1.0 - ref_idx) / (1.0 + ref_idx);
         r0 = r0 * r0;
-        return r0 + (1.0 - r0) * pow(1.0 - cosine, 5.0);
+        return r0 + (1.0 - r0) * pow((1.0 - cosine), 5.0);
     }
 
     vec3 trace(Ray ray, int maxDepth) {
         vec3 color = vec3(0.0);
 
-        //attenuation
+        //attenuation is optional
         vec3 attenuation = vec3(1.0);
 
         for (int depth = 0; depth < 8; depth++) {
             if (depth >= maxDepth) break;
 
-            // Allow light-sphere hits (not used for primary hit)
             HitData lightHit = traceScene(ray, true);
-            // primary hit (exclude light sphere)
-            HitData hit = traceScene(ray, false);
-
-            // no intersection: background
-            if (!hit.hit) {
-                color += attenuation * vec3(0.02, 0.03, 0.06);
+            
+            // If we hit the light directly, return its emission
+            if (lightHit.hit && lightHit.color.x > 5.0) {
+                color += attenuation * lightHit.color;
                 break;
             }
 
-            // compute lighting direction and distance to light
+            HitData hit = traceScene(ray, false);
+
+            if (!hit.hit) {
+                // Background gradient
+                float t = 0.5 * (ray.direction.y + 1.0);
+                color += attenuation * mix(vec3(0.05, 0.05, 0.1), vec3(0.3, 0.5, 0.8), t);
+                break;
+            }
+
             vec3 lightDir = normalize(lightSphere.center - hit.point);
             float lightDist = length(lightSphere.center - hit.point);
 
-            // shadow ray (offset by epsilon along normal)
-            Ray shadowRay = Ray(hit.point + hit.normal * 1e-4, lightDir);
+            // Shadow ray
+            Ray shadowRay = Ray(hit.point + hit.normal * 0.001, lightDir);
             HitData shadowHit = traceScene(shadowRay, false);
-            float shadow = 1.0;
-            if (shadowHit.hit && shadowHit.t < lightDist - 1e-4) shadow = 0.0;
-
-            // Ambient and direct diffuse + specular (Phong-ish)
-            vec3 ambientLight = u_ambientStrength * hit.color;
-            float diff = max(dot(hit.normal, lightDir), 0.0);
-            vec3 diffuse = shadow * diff * lightSphere.color * hit.color;
-
-            // simple specular (Phong)
-            vec3 viewDir = normalize(-ray.direction);
-            vec3 reflectDir = reflect(-lightDir, hit.normal);
-            float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
-            vec3 specular = shadow * spec * vec3(1.0);
-
-            vec3 directLight = diffuse + 0.6 * specular;
+            bool inShadow = shadowHit.hit && shadowHit.t < lightDist;
 
             if (hit.material == MATERIAL_DIFFUSE) {
-                // local Phong-like shading only
+                // Phong lighting
+                float diff = max(dot(hit.normal, lightDir), 0.0);
+                vec3 viewDir = normalize(-ray.direction);
+                vec3 reflectDir = reflect(-lightDir, hit.normal);
+                float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+                
+                float lightIntensity = 1.0 / (lightDist * lightDist);
+                vec3 directLight = inShadow ? vec3(0.0) : 
+                    hit.color * lightSphere.color * lightIntensity * (diff * 0.8 + spec * 0.3);
+                
+                vec3 ambientLight = hit.color * u_ambientStrength;
+
                 vec3 lighting = directLight + ambientLight;
                 color += attenuation * lighting;
-                break; // stop for diffuse
+                break;
+
             } else if (hit.material == MATERIAL_REFRACTIVE) {
-                // compute refraction/reflection decision using Schlick
-                float cosi = clamp(dot(ray.direction, hit.normal), -1.0, 1.0);
-                float etai = 1.0;
-                float etat = hit.refractiveIndex;
-                vec3 n = hit.normal;
-                if (cosi > 0.0) {
-                    // inside the medium
-                    n = -hit.normal;
-                    float tmp = etai; etai = etat; etat = tmp;
-                }
-                float etaRatio = etai / etat;
-                vec3 refrDir = refraction(ray.direction, n, etaRatio);
-                bool total_internel_reflectioin = (length(refrDir) < 1e-6);
-
-                float cosine = abs(dot(-ray.direction, hit.normal));
+                float eta = hit.frontFace ? (1.0 / hit.refractiveIndex) : hit.refractiveIndex;
+                vec3 refracted = refraction(ray.direction, hit.normal, eta);
+                bool total_internel_reflectioin = length(refracted) < 0.01;
+                
+                float cosine = hit.frontFace ? 
+                    -dot(ray.direction, hit.normal) : 
+                    dot(ray.direction, hit.normal);
                 float schlick_value = schlick(cosine, hit.refractiveIndex);
-
+                
                 vec3 direction;
                 if (total_internel_reflectioin || schlick_value > 0.5) {
-                    // reflection
+                    //direction = reflection ray
                     direction = reflect(ray.direction, hit.normal);
                 } else {
-                    // refraction
-                    direction = refrDir;
+                    //direction = refraction ray
+                    direction = refracted;
                 }
 
-                ray = Ray(hit.point + direction * 0.001, normalize(direction));
+                ray = Ray(hit.point + direction * 0.001, direction);
                 attenuation *= hit.color;
 
-            } else { // MATERIAL_REFLECTIVE
-                // simple perfect reflection
-                vec3 reflectDir = reflect(ray.direction, hit.normal);
-                ray = Ray(hit.point + hit.normal * 0.001, normalize(reflectDir));
-                attenuation *= hit.reflectivity * vec3(1.0);
+            } else {
+                // Reflective material
+                attenuation *= hit.reflectivity;
+                ray = Ray(hit.point + hit.normal * 0.001, reflect(ray.direction, hit.normal));
             }
 
             if (length(attenuation) < 0.01) break;
@@ -445,9 +453,7 @@ Please copy your edits to the source code if you want to save them, as the playg
             gl.compileShader(shader);
 
             if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-                const log = gl.getShaderInfoLog(shader);
-                console.error('Shader compile error:', log);
-                throw new Error(log);
+                throw new Error(gl.getShaderInfoLog(shader));
             }
 
             return shader;
@@ -462,9 +468,7 @@ Please copy your edits to the source code if you want to save them, as the playg
             gl.linkProgram(prog);
 
             if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-                const log = gl.getProgramInfoLog(prog);
-                console.error('Program link error:', log);
-                throw new Error(log);
+                throw new Error(gl.getProgramInfoLog(prog));
             }
 
             return prog;
@@ -486,7 +490,6 @@ Please copy your edits to the source code if you want to save them, as the playg
             vao = gl.createVertexArray();
             gl.bindVertexArray(vao);
             gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-            positionLocation = gl.getAttribLocation(program, 'position');
             gl.enableVertexAttribArray(positionLocation);
             gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
             gl.bindVertexArray(null);
@@ -517,35 +520,21 @@ Please copy your edits to the source code if you want to save them, as the playg
         let maxBounces = 4;
         let ambientStrength = 0.25;
 
-        // UI Controls (inserted into the starter page)
-        const controls = document.getElementById('controls');
+        // UI Controls
+        const bouncesSlider = document.getElementById('bouncesSlider');
+        const bouncesValue = document.getElementById('bouncesValue');
+        const ambientSlider = document.getElementById('ambientSlider');
+        const ambientValue = document.getElementById('ambientValue');
 
-        function makeRow(labelText, inputEl, valueEl) {
-            const row = document.createElement('div');
-            row.className = 'control-row';
-            const label = document.createElement('div');
-            label.style.minWidth = '150px';
-            label.textContent = labelText;
-            row.appendChild(label);
-            row.appendChild(inputEl);
-            if (valueEl) row.appendChild(valueEl);
-            return row;
-        }
+        bouncesSlider.addEventListener('input', (e) => {
+            maxBounces = parseInt(e.target.value);
+            bouncesValue.textContent = maxBounces;
+        });
 
-        // Max bounces slider
-        const bounceSlider = document.createElement('input');
-        bounceSlider.type = 'range';
-        bounceSlider.min = 1; bounceSlider.max = 8; bounceSlider.step = 1; bounceSlider.value = maxBounces;
-        const bounceValue = document.createElement('div'); bounceValue.textContent = maxBounces;
-        bounceSlider.oninput = (e) => { maxBounces = parseInt(e.target.value); bounceValue.textContent = maxBounces; };
-        controls.appendChild(makeRow('Max Bounces', bounceSlider, bounceValue));
-
-        // Ambient slider
-        const ambientSlider = document.createElement('input');
-        ambientSlider.type = 'range'; ambientSlider.min = 0; ambientSlider.max = 1; ambientSlider.step = 0.01; ambientSlider.value = ambientStrength;
-        const ambientValue = document.createElement('div'); ambientValue.textContent = ambientStrength.toFixed(2);
-        ambientSlider.oninput = (e) => { ambientStrength = parseFloat(e.target.value); ambientValue.textContent = ambientStrength.toFixed(2); };
-        controls.appendChild(makeRow('Ambient Strength', ambientSlider, ambientValue));
+        ambientSlider.addEventListener('input', (e) => {
+            ambientStrength = parseFloat(e.target.value);
+            ambientValue.textContent = ambientStrength.toFixed(2);
+        });
 
         let startTime = Date.now();
         function render() {
@@ -559,9 +548,9 @@ Please copy your edits to the source code if you want to save them, as the playg
             gl.bindVertexArray(vao);
 
             gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
-            if (timeLocation) gl.uniform1f(timeLocation, time);
-            if (maxBouncesLocation) gl.uniform1i(maxBouncesLocation, maxBounces);
-            if (ambientStrengthLocation) gl.uniform1f(ambientStrengthLocation, ambientStrength);
+            gl.uniform1f(timeLocation, time);
+            gl.uniform1i(maxBouncesLocation, maxBounces);
+            gl.uniform1f(ambientStrengthLocation, ambientStrength);
 
             gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
