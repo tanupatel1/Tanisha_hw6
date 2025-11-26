@@ -1,39 +1,64 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>HW6 Ray Tracing - Glass Sphere + Diffuse Cube</title>
-<style>
-body { margin: 0; background: #111; color: #ccc; font-family: monospace; padding: 20px; }
-textarea { background: #222; color: #0f0; font: 14px monospace; width: 800px; height: 600px; }
-canvas { border: 1px solid #444; }
-.container { display: flex; gap: 20px; align-items: flex-start; }
-.canvas-container { display: flex; flex-direction: column; }
-.editor-panel { display: flex; flex-direction: column; gap: 10px; }
-.controls { margin-top: 10px; }
-.controls label { display: block; margin: 5px 0; }
-</style>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>HW 6 Ray Tracing</title>
+    <style>
+        body { 
+            margin: 0; 
+            background: #111; 
+            color: #ccc;
+            font-family: monospace;
+            padding: 20px;
+        }
+        textarea {
+            background: #222;
+            color: #0f0;
+            font: 14px monospace;
+            width: 800px;
+            height: 600px;
+        }
+        canvas {
+            border: 1px solid #444;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
+        .canvas-container {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .editor-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .controls {
+            margin-top: 10px;
+            color: #ccc;
+        }
+        .controls label { display:block; margin:6px 0; }
+        .control-row { display:flex; gap:10px; align-items:center; margin:6px 0; }
+    </style>
 </head>
 <body>
 
-<h2>HW6 Ray Tracing</h2>
-<p>Edit shaders on the left, see the result on the right. (Glass sphere + diffuse cube changes applied.)</p>
+<h2>HW 6 Ray Tracing</h2>
+<p>Edit vertex and fragment shaders on the left, and you can see the result on the right instantly. <br>
+Please copy your edits to the source code if you want to save them, as the playground doesn't save them to the file.</p>
 
 <div class="container">
     <div class="canvas-container">
         <canvas id="glCanvas" width="800" height="600"></canvas>
-        <div class="controls">
-            <label>Max Bounces: <span id="bounceVal">4</span>
-                <input type="range" id="maxBouncesSlider" min="1" max="8" value="4">
-            </label>
-            <label>Ambient Strength: <span id="ambientVal">0.25</span>
-                <input type="range" id="ambientSlider" min="0" max="1" step="0.01" value="0.25">
-            </label>
-        </div>
+        <div id="controls" class="controls"></div>
     </div>
     <div class="editor-panel">
-        <div>
+         <div>
             <b>Fragment Shader</b><br>
             <textarea id="fsEditor"></textarea>
         </div>
@@ -43,345 +68,509 @@ canvas { border: 1px solid #444; }
         </div>
     </div>
 </div>
+    
+
 
 <script id="vertex-shader" type="x-shader/x-vertex">#version 300 es
-in vec2 position;
-void main() {
-    gl_Position = vec4(position, 0.0, 1.0);
-}
+    in vec2 position;
+    void main() {
+        gl_Position = vec4(position, 0.0, 1.0);
+    }
 </script>
 
 <script id="fragment-shader" type="x-shader/x-fragment">#version 300 es
-precision highp float;
+    precision highp float;
 
-uniform float u_time;
-uniform vec2 u_resolution;
-uniform int u_maxBounces;
-uniform float u_ambientStrength;
+    //time for animation
+    uniform float u_time;
+    uniform vec2 u_resolution;
+    uniform int u_maxBounces;
+    uniform float u_ambientStrength;
 
-out vec4 fragColor;
+    out vec4 fragColor;
 
-const int MATERIAL_DIFFUSE = 0;
-const int MATERIAL_REFLECTIVE = 1;
-const int MATERIAL_REFRACTIVE = 2; // kept old name consistent
+    // Material types
+    const int MATERIAL_DIFFUSE = 0;
+    const int MATERIAL_REFLECTIVE = 1;
+    const int MATERIAL_REFRACTIVE = 2;
 
-struct Ray { vec3 origin; vec3 direction; };
-struct Sphere { vec3 center; float radius; vec3 color; int material; float reflectivity; float refractiveIndex; };
-struct Cube { vec3 center; vec3 size; vec3 color; float reflectivity; mat3 rotation; int material; float refractiveIndex; };
-struct HitData { bool hit; float t; vec3 point; vec3 normal; vec3 color; int material; float reflectivity; float refractiveIndex; };
+    // Ray structure
+    struct Ray {
+        vec3 origin;
+        vec3 direction;
+    };
 
-Sphere spheres[2];
-Sphere light1;
-Sphere light2;
-Cube cube;
+    // Sphere structure
+    struct Sphere {
+        vec3 center;
+        float radius;
+        vec3 color;
+        int material;
+        float reflectivity;
+        float refractiveIndex;
+    };
 
-mat3 rotationY(float angle){
-    float c = cos(angle);
-    float s = sin(angle);
-    return mat3(c,0.0,s, 0.0,1.0,0.0, -s,0.0,c);
-}
+    // Cube structure
+    struct Cube {
+        vec3 center;
+        vec3 size;
+        vec3 color;
+        float reflectivity;
+    };
 
-void initScene(float time){
-    // Moving lights
-    light1.center = vec3(-1.0, 2.0 + sin(time*1.5), -1.5);
-    light1.radius = 0.2; light1.color = vec3(1.0,0.95,0.9); light1.material = MATERIAL_DIFFUSE;
-    light1.reflectivity = 0.0; light1.refractiveIndex = 1.0;
-
-    light2.center = vec3(1.5, 1.5 + cos(time*1.2), -2.0);
-    light2.radius = 0.2; light2.color = vec3(0.8,0.9,1.0); light2.material = MATERIAL_DIFFUSE;
-    light2.reflectivity = 0.0; light2.refractiveIndex = 1.0;
-
-    // Cube -> make it DIFFUSE (user requested cube diffuse)
-    cube.center = vec3(0.0, -0.3, -1.0);
-    cube.size = vec3(0.9);
-    cube.color = vec3(1.0, 0.2, 0.2); // bright red for easy visibility
-    cube.reflectivity = 0.05;
-    cube.material = MATERIAL_DIFFUSE;
-    cube.refractiveIndex = 1.0;
-    cube.rotation = rotationY(time*0.5);
-
-    // Sphere 0 -> GLASS (refractive, bluish tint) - moving
-    spheres[0].center = vec3(-0.8 + 0.5*sin(time*0.7), -0.1 + 0.25*cos(time*0.5), -2.0);
-    spheres[0].radius = 0.45;
-    spheres[0].color = vec3(0.75, 0.92, 1.0); // slightly bluish glass tint
-    spheres[0].material = MATERIAL_REFRACTIVE;
-    spheres[0].reflectivity = 0.05; spheres[0].refractiveIndex = 1.45; // typical glass ~1.45
-
-    // Sphere 1 -> bright yellow reflective sphere (mirror-ish)
-    spheres[1].center = vec3(0.8*cos(time*0.8), 0.6 + 0.3*sin(time*1.0), -1.6 + 0.4*sin(time*0.5));
-    spheres[1].radius = 0.45;
-    spheres[1].color = vec3(1.0, 1.0, 0.05); // bright yellow
-    spheres[1].material = MATERIAL_REFLECTIVE;
-    spheres[1].reflectivity = 0.92; spheres[1].refractiveIndex = 1.0;
-}
-
-bool intersectSphere(Ray ray, Sphere sph, out float t){
-    vec3 oc = ray.origin - sph.center;
-    float a = dot(ray.direction,ray.direction);
-    float b = 2.0*dot(oc,ray.direction);
-    float c = dot(oc,oc)-sph.radius*sph.radius;
-    float disc = b*b-4.0*a*c;
-    if(disc<0.0) return false;
-    float sqrtd = sqrt(disc);
-    float t0=(-b-sqrtd)/(2.0*a);
-    float t1=(-b+sqrtd)/(2.0*a);
-    t = (t0>0.001)? t0: ((t1>0.001)? t1: -1.0);
-    return t>0.0;
-}
-
-bool intersectCube(Ray ray, out float t, out vec3 normal){
-    vec3 ro = cube.rotation * (ray.origin - cube.center);
-    vec3 rd = cube.rotation * ray.direction;
-    vec3 minB = -cube.size*0.5;
-    vec3 maxB = cube.size*0.5;
-    vec3 invD = 1.0/rd;
-    vec3 t0s = (minB - ro)*invD;
-    vec3 t1s = (maxB - ro)*invD;
-    vec3 tsm = min(t0s,t1s);
-    vec3 tb = max(t0s,t1s);
-    float tmin = max(max(tsm.x, tsm.y), tsm.z);
-    float tmax = min(min(tb.x,tb.y), tb.z);
-    if(tmax<max(tmin,0.0)) return false;
-    t = (tmin>0.0)? tmin:tmax;
-    vec3 p = ro + rd*t;
-    vec3 d = p; vec3 absD = abs(d);
-    if(absD.x>absD.y && absD.x>absD.z) normal = vec3(sign(d.x),0.0,0.0);
-    else if(absD.y>absD.z) normal = vec3(0.0,sign(d.y),0.0);
-    else normal = vec3(0.0,0.0,sign(d.z));
-    normal = transpose(cube.rotation) * normal;
-    return true;
-}
-
-HitData traceScene(Ray ray, bool includeLights){
-    HitData closest; closest.hit=false; closest.t=1e10;
-
-    if(includeLights){
+    // Hit record structure
+    struct HitData {
+        bool hit;
         float t;
-        if(intersectSphere(ray, light1, t) && t<closest.t){
-            closest.hit=true; closest.t=t; closest.point=ray.origin+ray.direction*t;
-            closest.normal=normalize(closest.point-light1.center); closest.color=light1.color; closest.material=light1.material;
-            closest.reflectivity=light1.reflectivity; closest.refractiveIndex=light1.refractiveIndex;
-        }
-        if(intersectSphere(ray, light2, t) && t<closest.t){
-            closest.hit=true; closest.t=t; closest.point=ray.origin+ray.direction*t;
-            closest.normal=normalize(closest.point-light2.center); closest.color=light2.color; closest.material=light2.material;
-            closest.reflectivity=light2.reflectivity; closest.refractiveIndex=light2.refractiveIndex;
-        }
+        vec3 point;
+        vec3 normal;
+        vec3 color;
+        int material;
+        float reflectivity;
+        float refractiveIndex;
+        bool frontFace;
+    };
+
+    // Scene objects
+    Sphere spheres[2];
+    Sphere lightSphere;
+    Cube cube;
+
+    // Initialize scene objects (colors chosen: sphere1 red, sphere2 blue, cube green, light white)
+    void initScene(float time) {
+        // Light sphere (moves slightly)
+        lightSphere = Sphere(
+            vec3(0.0 + 0.8*sin(time*0.9), 1.8 + 0.3*cos(time*0.6), -1.0),
+            0.12,
+            vec3(1.0, 0.98, 0.9),
+            MATERIAL_DIFFUSE,
+            0.0,
+            1.0
+        );
+
+        // cube (green, reflective) — slab method uses center & size
+        cube = Cube(
+            vec3(-0.9 + 0.6*sin(time*0.7), -0.6, -3.0 + 0.2*cos(time*0.5)),
+            vec3(1.0, 1.0, 1.0),
+            vec3(0.2, 0.9, 0.3),
+            0.85
+        );
+
+        // Sphere 1 (diffuse red) — moving
+        spheres[0] = Sphere(
+            vec3(1.2 * cos(time*0.8), 0.1 * sin(time*1.2), -3.2 + 0.3*sin(time*0.7)),
+            0.55,
+            vec3(0.9, 0.25, 0.2),
+            MATERIAL_DIFFUSE,
+            0.0,
+            1.0
+        );
+
+        // Sphere 2 (refractive blue)
+        spheres[1] = Sphere(
+            vec3(0.4, 0.25*sin(time*1.3), -2.0 + 0.4*cos(time*0.6)),
+            0.45,
+            vec3(0.25, 0.55, 0.95),
+            MATERIAL_REFRACTIVE,
+            0.05,
+            1.5
+        );
     }
 
-    float tCube; vec3 nCube;
-    if(intersectCube(ray, tCube, nCube) && tCube<closest.t){
-        closest.hit=true; closest.t=tCube; closest.point=ray.origin+ray.direction*tCube;
-        closest.normal=nCube; closest.color=cube.color; closest.material=cube.material;
-        closest.reflectivity=cube.reflectivity; closest.refractiveIndex=cube.refractiveIndex;
+    // Ray-sphere intersection 
+    bool intersectSphere(Ray ray, Sphere sphere, out float t) {
+        vec3 oc = ray.origin - sphere.center;
+        float a = dot(ray.direction, ray.direction);
+        float b = 2.0 * dot(oc, ray.direction);
+        float c = dot(oc, oc) - sphere.radius * sphere.radius;
+        float disc = b*b - 4.0*a*c;
+        if (disc < 0.0) return false;
+        float sqrtD = sqrt(disc);
+        float t0 = (-b - sqrtD) / (2.0 * a);
+        float t1 = (-b + sqrtD) / (2.0 * a);
+        float eps = 1e-4;
+        if (t0 > eps) { t = t0; return true; }
+        if (t1 > eps) { t = t1; return true; }
+        return false;
     }
 
-    for(int i=0;i<2;i++){
-        float tS;
-        if(intersectSphere(ray,spheres[i],tS) && tS<closest.t){
-            closest.hit=true; closest.t=tS; closest.point=ray.origin+ray.direction*tS;
-            closest.normal=normalize(closest.point-spheres[i].center); closest.color=spheres[i].color;
-            closest.material=spheres[i].material; closest.reflectivity=spheres[i].reflectivity;
-            closest.refractiveIndex=spheres[i].refractiveIndex;
-        }
+    // Ray-cube intersection 
+    bool intersectCube(Ray ray, out float t, out vec3 normal) {
+        vec3 minB = cube.center - cube.size * 0.5;
+        vec3 maxB = cube.center + cube.size * 0.5;
+
+        // avoid divide by zero — use large value when direction is near zero
+        vec3 dir = ray.direction;
+        vec3 invDir = vec3(1.0) / dir;
+        invDir = mix(invDir, vec3(1e8), lessThan(abs(dir), vec3(1e-6)));
+
+        vec3 t0s = (minB - ray.origin) * invDir;
+        vec3 t1s = (maxB - ray.origin) * invDir;
+
+        vec3 tsm = min(t0s, t1s);
+        vec3 tb  = max(t0s, t1s);
+
+        float tmin = max(max(tsm.x, tsm.y), tsm.z);
+        float tmax = min(min(tb.x, tb.y), tb.z);
+
+        if (tmax < 0.0 || tmin > tmax) return false;
+
+        t = (tmin > 1e-4) ? tmin : tmax;
+        vec3 hitP = ray.origin + ray.direction * t;
+        vec3 d = hitP - cube.center;
+        vec3 ad = abs(d);
+
+        if (ad.x >= ad.y && ad.x >= ad.z) normal = vec3(sign(d.x), 0.0, 0.0);
+        else if (ad.y >= ad.z) normal = vec3(0.0, sign(d.y), 0.0);
+        else normal = vec3(0.0, 0.0, sign(d.z));
+
+        return true;
     }
-    return closest;
-}
 
-vec3 refractVec(vec3 I, vec3 N, float eta){
-    float cosi = clamp(dot(-I,N),-1.0,1.0);
-    float k = 1.0 - eta*eta*(1.0-cosi*cosi);
-    if(k<0.0) return vec3(0.0); else return eta*I+(eta*cosi-sqrt(k))*N;
-}
+    // Trace objects in the scene for intersections
+    HitData traceScene(Ray ray, bool includeLightSphere) {
+        HitData closest;
+        closest.hit = false;
+        closest.t = 1e10;
+        closest.reflectivity = 0.0;
+        closest.refractiveIndex = 1.0;
+        closest.color = vec3(0.0);
+        closest.material = -1;
+        closest.frontFace = true;
 
-float schlick(float cosine,float ref_idx){
-    float r0=(1.0-ref_idx)/(1.0+ref_idx); r0=r0*r0;
-    return r0+(1.0-r0)*pow(1.0-cosine,5.0);
-}
-
-vec3 trace(Ray ray,int maxDepth){
-    vec3 color=vec3(0.0);
-    vec3 attenuation=vec3(1.0);
-
-    // iterative recursion (no GLSL recursion)
-    for(int depth=0;depth<8;depth++){
-        if(depth>=maxDepth) break;
-        HitData hit=traceScene(ray,false);
-        if(!hit.hit){ color += attenuation * vec3(0.03,0.04,0.06); break; } // slight bluish background
-
-        // Basic ambient + direct Phong-ish lighting from two small area lights
-        vec3 ambient = hit.color * u_ambientStrength;
-
-        // Light 1
-        vec3 lDir1 = normalize(light1.center - hit.point);
-        HitData sh1 = traceScene(Ray(hit.point + hit.normal*0.001, lDir1), true);
-        float shadow1 = sh1.hit ? 0.0 : 1.0;
-        vec3 diff1 = hit.color * light1.color * max(dot(hit.normal, lDir1), 0.0) * shadow1;
-
-        // Light 2
-        vec3 lDir2 = normalize(light2.center - hit.point);
-        HitData sh2 = traceScene(Ray(hit.point + hit.normal*0.001, lDir2), true);
-        float shadow2 = sh2.hit ? 0.0 : 1.0;
-        vec3 diff2 = hit.color * light2.color * max(dot(hit.normal, lDir2), 0.0) * shadow2;
-
-        vec3 viewDir = normalize(-ray.direction);
-        vec3 spec1 = light1.color * pow(max(dot(viewDir, reflect(-lDir1, hit.normal)), 0.0), 32.0);
-        vec3 spec2 = light2.color * pow(max(dot(viewDir, reflect(-lDir2, hit.normal)), 0.0), 32.0);
-
-        vec3 direct = diff1 + diff2 + 0.4*(spec1 + spec2); // slightly stronger spec
-
-        if(hit.material == MATERIAL_DIFFUSE){
-            color += attenuation * (direct + ambient);
-            break;
+        // Light sphere intersection
+        if (includeLightSphere) {
+            float tL;
+            if (intersectSphere(ray, lightSphere, tL)) {
+                if (tL < closest.t) {
+                    closest.hit = true;
+                    closest.t = tL;
+                    closest.point = ray.origin + ray.direction * tL;
+                    closest.normal = normalize(closest.point - lightSphere.center);
+                    closest.color = lightSphere.color;
+                    closest.material = lightSphere.material;
+                    closest.reflectivity = 0.0;
+                    closest.refractiveIndex = 1.0;
+                    closest.frontFace = true;
+                }
+            }
         }
-        else if(hit.material == MATERIAL_REFLECTIVE){
-            color += attenuation * ambient;
-            attenuation *= hit.reflectivity;
-            // reflect the ray
-            ray.origin = hit.point + hit.normal * 0.001;
-            ray.direction = reflect(ray.direction, hit.normal);
+
+        // Cube intersection
+        float cube_t;
+        vec3 cubeNormal;
+        if (intersectCube(ray, cube_t, cubeNormal)) {
+            if (cube_t < closest.t) {
+                closest.hit = true;
+                closest.t = cube_t;
+                closest.point = ray.origin + ray.direction * cube_t;
+                closest.normal = cubeNormal;
+                closest.color = cube.color;
+                closest.material = MATERIAL_REFLECTIVE;
+                closest.reflectivity = cube.reflectivity;
+                closest.refractiveIndex = 1.0;
+                closest.frontFace = dot(ray.direction, closest.normal) < 0.0;
+            }
         }
-        else if(hit.material == MATERIAL_REFRACTIVE){
-            // compute fresnel term and mix reflection/refraction for better visible glass
-            float cosi = clamp(dot(-ray.direction, hit.normal), -1.0, 1.0);
-            float eta = (dot(ray.direction, hit.normal) < 0.0) ? (1.0 / hit.refractiveIndex) : hit.refractiveIndex;
-            vec3 reflectDir = reflect(ray.direction, hit.normal);
-            vec3 refractDir = refractVec(ray.direction, hit.normal, eta);
 
-            float fresnel = schlick(abs(cosi), hit.refractiveIndex);
+        // Sphere intersections
+        for (int i = 0; i < 2; i++) {
+            float tS;
+            if (intersectSphere(ray, spheres[i], tS)) {
+                if (tS < closest.t) {
+                    closest.hit = true;
+                    closest.t = tS;
+                    closest.point = ray.origin + ray.direction * tS;
+                    closest.normal = normalize(closest.point - spheres[i].center);
+                    closest.color = spheres[i].color;
+                    closest.material = spheres[i].material;
+                    closest.reflectivity = spheres[i].reflectivity;
+                    closest.refractiveIndex = spheres[i].refractiveIndex;
+                    closest.frontFace = dot(ray.direction, closest.normal) < 0.0;
+                }
+            }
+        }
+        return closest;
+    }
 
-            // If total internal reflection occurred, refractDir may be zero — then just reflect.
-            bool totalInternal = (length(refractDir) < 0.0001);
+    // refraction (lecture-style; returns zero vec on TIR)
+    vec3 refraction(vec3 I, vec3 N, float eta) {
+        float cosi = clamp(-dot(I, N), -1.0, 1.0);
+        float k = 1.0 - eta * eta * (1.0 - cosi * cosi);
+        if (k < 0.0) return vec3(0.0); // total internal reflection
+        return normalize(eta * I + (eta * cosi - sqrt(k)) * N);
+    }
 
-            // Mix reflection & refraction directions using fresnel (more physical & visible)
-            if(totalInternal){
-                ray.origin = hit.point + hit.normal * 0.001;
-                ray.direction = reflectDir;
-            } else {
-                // blend directions to get visible combination (keeps iterative loop simple)
-                vec3 newDir = normalize(mix(refractDir, reflectDir, fresnel));
-                // small bias to avoid self-intersection: if newDir is more inside, nudge inside/outside
-                ray.origin = hit.point + sign(dot(newDir, hit.normal)) * hit.normal * 0.001;
-                ray.direction = newDir;
+    // Schlick approximation
+    float schlick(float cosine, float ref_idx) {
+        float r0 = (1.0 - ref_idx) / (1.0 + ref_idx);
+        r0 = r0 * r0;
+        return r0 + (1.0 - r0) * pow(1.0 - cosine, 5.0);
+    }
+
+    vec3 trace(Ray ray, int maxDepth) {
+        vec3 color = vec3(0.0);
+
+        //attenuation
+        vec3 attenuation = vec3(1.0);
+
+        for (int depth = 0; depth < 8; depth++) {
+            if (depth >= maxDepth) break;
+
+            // Allow light-sphere hits (not used for primary hit)
+            HitData lightHit = traceScene(ray, true);
+            // primary hit (exclude light sphere)
+            HitData hit = traceScene(ray, false);
+
+            // no intersection: background
+            if (!hit.hit) {
+                color += attenuation * vec3(0.02, 0.03, 0.06);
+                break;
             }
 
-            // Add a small contribution of environment to show highlights on glass
-            color += attenuation * (0.02 + 0.2 * fresnel) * vec3(1.0);
+            // compute lighting direction and distance to light
+            vec3 lightDir = normalize(lightSphere.center - hit.point);
+            float lightDist = length(lightSphere.center - hit.point);
 
-            // Glass should not tint too fast; apply gentle attenuation
-            vec3 tint = hit.color; // glass tint
-            attenuation *= mix(vec3(1.0), tint, 0.15); // only a small amount of tint per bounce
+            // shadow ray (offset by epsilon along normal)
+            Ray shadowRay = Ray(hit.point + hit.normal * 1e-4, lightDir);
+            HitData shadowHit = traceScene(shadowRay, false);
+            float shadow = 1.0;
+            if (shadowHit.hit && shadowHit.t < lightDist - 1e-4) shadow = 0.0;
+
+            // Ambient and direct diffuse + specular (Phong-ish)
+            vec3 ambientLight = u_ambientStrength * hit.color;
+            float diff = max(dot(hit.normal, lightDir), 0.0);
+            vec3 diffuse = shadow * diff * lightSphere.color * hit.color;
+
+            // simple specular (Phong)
+            vec3 viewDir = normalize(-ray.direction);
+            vec3 reflectDir = reflect(-lightDir, hit.normal);
+            float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+            vec3 specular = shadow * spec * vec3(1.0);
+
+            vec3 directLight = diffuse + 0.6 * specular;
+
+            if (hit.material == MATERIAL_DIFFUSE) {
+                // local Phong-like shading only
+                vec3 lighting = directLight + ambientLight;
+                color += attenuation * lighting;
+                break; // stop for diffuse
+            } else if (hit.material == MATERIAL_REFRACTIVE) {
+                // compute refraction/reflection decision using Schlick
+                float cosi = clamp(dot(ray.direction, hit.normal), -1.0, 1.0);
+                float etai = 1.0;
+                float etat = hit.refractiveIndex;
+                vec3 n = hit.normal;
+                if (cosi > 0.0) {
+                    // inside the medium
+                    n = -hit.normal;
+                    float tmp = etai; etai = etat; etat = tmp;
+                }
+                float etaRatio = etai / etat;
+                vec3 refrDir = refraction(ray.direction, n, etaRatio);
+                bool total_internel_reflectioin = (length(refrDir) < 1e-6);
+
+                float cosine = abs(dot(-ray.direction, hit.normal));
+                float schlick_value = schlick(cosine, hit.refractiveIndex);
+
+                vec3 direction;
+                if (total_internel_reflectioin || schlick_value > 0.5) {
+                    // reflection
+                    direction = reflect(ray.direction, hit.normal);
+                } else {
+                    // refraction
+                    direction = refrDir;
+                }
+
+                ray = Ray(hit.point + direction * 0.001, normalize(direction));
+                attenuation *= hit.color;
+
+            } else { // MATERIAL_REFLECTIVE
+                // simple perfect reflection
+                vec3 reflectDir = reflect(ray.direction, hit.normal);
+                ray = Ray(hit.point + hit.normal * 0.001, normalize(reflectDir));
+                attenuation *= hit.reflectivity * vec3(1.0);
+            }
+
+            if (length(attenuation) < 0.01) break;
         }
 
-        if(length(attenuation) < 0.01) break;
+        return color;
     }
 
-    return color;
-}
+    void main() {
+        initScene(u_time);
 
-void main(){
-    initScene(u_time);
-    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution) / u_resolution.y;
-    vec3 col = vec3(0.0);
-    int samples = 4;
-    // jittered supersampling
-    for(int i=0;i<samples;i++){
-        for(int j=0;j<samples;j++){
-            vec2 jitter = (vec2(float(i),float(j)) + vec2(0.5)) / float(samples) - 0.5;
-            vec3 origin = vec3(0.0, 0.0, 2.0);
-            vec3 dir = normalize(vec3(uv + jitter * 0.004, -1.5));
-            col += trace(Ray(origin, dir), u_maxBounces);
-        }
+        vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution) / u_resolution.y;
+
+        vec3 origin = vec3(0.0, 0.0, 2.0);
+        vec3 direction = normalize(vec3(uv, -1.5));
+
+        Ray ray = Ray(origin, direction);
+        vec3 color = trace(ray, u_maxBounces);
+
+        color = pow(color, vec3(1.0 / 2.2));
+
+        fragColor = vec4(color, 1.0);
     }
-    col /= float(samples * samples);
-    col = pow(col, vec3(1.0/2.2));
-    fragColor = vec4(col, 1.0);
-}
 </script>
 
 <script>
-window.onload=function(){
-    const canvas=document.getElementById('glCanvas');
-    const gl=canvas.getContext('webgl2');
-    if(!gl){alert('WebGL2 not supported'); return;}
+    (function() {
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl2');
 
-    const vsEditor=document.getElementById('vsEditor');
-    const fsEditor=document.getElementById('fsEditor');
+        if (!gl) {
+            alert('WebGL 2 not supported in this browser');
+            throw new Error('WebGL 2 not supported');
+        }
 
-    vsEditor.value=document.getElementById('vertex-shader').textContent.trim();
-    fsEditor.value=document.getElementById('fragment-shader').textContent.trim();
+        const vsEditor = document.getElementById('vsEditor');
+        const fsEditor = document.getElementById('fsEditor');
 
-    let program, positionLocation, resolutionLocation, timeLocation, maxBouncesLocation, ambientStrengthLocation;
-    let vao, positionBuffer;
-    const positions=new Float32Array([-1,-1,1,-1,-1,1,1,1]);
+        const vertexShaderSource = document.getElementById('vertex-shader').textContent;
+        const fragmentShaderSource = document.getElementById('fragment-shader').textContent;
 
-    function createShader(gl,type,source){
-        const shader=gl.createShader(type);
-        gl.shaderSource(shader,source);
-        gl.compileShader(shader);
-        if(!gl.getShaderParameter(shader,gl.COMPILE_STATUS))
-            throw new Error(gl.getShaderInfoLog(shader));
-        return shader;
-    }
-    function createProgram(gl,vsSource,fsSource){
-        const vs=createShader(gl,gl.VERTEX_SHADER,vsSource);
-        const fs=createShader(gl,gl.FRAGMENT_SHADER,fsSource);
-        const prog=gl.createProgram();
-        gl.attachShader(prog,vs); gl.attachShader(prog,fs);
-        gl.linkProgram(prog);
-        if(!gl.getProgramParameter(prog,gl.LINK_STATUS))
-            throw new Error(gl.getProgramInfoLog(prog));
-        return prog;
-    }
-    function initBuffers(){
-        positionBuffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,positionBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER,positions,gl.STATIC_DRAW);
-        vao=gl.createVertexArray(); gl.bindVertexArray(vao);
-        gl.enableVertexAttribArray(positionLocation);
-        gl.vertexAttribPointer(positionLocation,2,gl.FLOAT,false,0,0);
-        gl.bindVertexArray(null);
-    }
-    function initShaderProgram(){
-        try{
-            program=createProgram(gl,vsEditor.value,fsEditor.value);
+        // Initialize editors with shader source
+        vsEditor.value = vertexShaderSource;
+        fsEditor.value = fragmentShaderSource;
+
+        let program, positionLocation, resolutionLocation, timeLocation, maxBouncesLocation, ambientStrengthLocation;
+        let vao, positionBuffer;
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                const log = gl.getShaderInfoLog(shader);
+                console.error('Shader compile error:', log);
+                throw new Error(log);
+            }
+
+            return shader;
+        }
+
+        function createProgram(gl, vsSource, fsSource) {
+            const vs = createShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+            const prog = gl.createProgram();
+            gl.attachShader(prog, vs);
+            gl.attachShader(prog, fs);
+            gl.linkProgram(prog);
+
+            if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+                const log = gl.getProgramInfoLog(prog);
+                console.error('Program link error:', log);
+                throw new Error(log);
+            }
+
+            return prog;
+        }
+
+        const positions = new Float32Array([
+            -1, -1,
+            1, -1,
+            -1, 1,
+            1, 1
+        ]);
+
+        // Initialize buffers
+        function initBuffers() {
+            positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+            vao = gl.createVertexArray();
+            gl.bindVertexArray(vao);
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            positionLocation = gl.getAttribLocation(program, 'position');
+            gl.enableVertexAttribArray(positionLocation);
+            gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+            gl.bindVertexArray(null);
+        }
+
+        function initShaderProgram() {
+            try {
+                program = createProgram(gl, vsEditor.value, fsEditor.value);
+                gl.useProgram(program);
+                positionLocation = gl.getAttribLocation(program, 'position');
+                resolutionLocation = gl.getUniformLocation(program, 'u_resolution');
+                timeLocation = gl.getUniformLocation(program, 'u_time');
+                maxBouncesLocation = gl.getUniformLocation(program, 'u_maxBounces');
+                ambientStrengthLocation = gl.getUniformLocation(program, 'u_ambientStrength');
+                
+                initBuffers();
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        initShaderProgram();
+
+        // Hot compile when any input in the playground text area
+        vsEditor.onkeyup = initShaderProgram;
+        fsEditor.onkeyup = initShaderProgram;
+
+        let maxBounces = 4;
+        let ambientStrength = 0.25;
+
+        // UI Controls (inserted into the starter page)
+        const controls = document.getElementById('controls');
+
+        function makeRow(labelText, inputEl, valueEl) {
+            const row = document.createElement('div');
+            row.className = 'control-row';
+            const label = document.createElement('div');
+            label.style.minWidth = '150px';
+            label.textContent = labelText;
+            row.appendChild(label);
+            row.appendChild(inputEl);
+            if (valueEl) row.appendChild(valueEl);
+            return row;
+        }
+
+        // Max bounces slider
+        const bounceSlider = document.createElement('input');
+        bounceSlider.type = 'range';
+        bounceSlider.min = 1; bounceSlider.max = 8; bounceSlider.step = 1; bounceSlider.value = maxBounces;
+        const bounceValue = document.createElement('div'); bounceValue.textContent = maxBounces;
+        bounceSlider.oninput = (e) => { maxBounces = parseInt(e.target.value); bounceValue.textContent = maxBounces; };
+        controls.appendChild(makeRow('Max Bounces', bounceSlider, bounceValue));
+
+        // Ambient slider
+        const ambientSlider = document.createElement('input');
+        ambientSlider.type = 'range'; ambientSlider.min = 0; ambientSlider.max = 1; ambientSlider.step = 0.01; ambientSlider.value = ambientStrength;
+        const ambientValue = document.createElement('div'); ambientValue.textContent = ambientStrength.toFixed(2);
+        ambientSlider.oninput = (e) => { ambientStrength = parseFloat(e.target.value); ambientValue.textContent = ambientStrength.toFixed(2); };
+        controls.appendChild(makeRow('Ambient Strength', ambientSlider, ambientValue));
+
+        let startTime = Date.now();
+        function render() {
+            const time = (Date.now() - startTime) / 1000.0;
+
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.clearColor(0, 0, 0, 1);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
             gl.useProgram(program);
-            positionLocation=gl.getAttribLocation(program,'position');
-            resolutionLocation=gl.getUniformLocation(program,'u_resolution');
-            timeLocation=gl.getUniformLocation(program,'u_time');
-            maxBouncesLocation=gl.getUniformLocation(program,'u_maxBounces');
-            ambientStrengthLocation=gl.getUniformLocation(program,'u_ambientStrength');
-            initBuffers();
-        }catch(e){console.error(e);}
-    }
+            gl.bindVertexArray(vao);
 
-    initShaderProgram();
-    vsEditor.onkeyup=initShaderProgram; fsEditor.onkeyup=initShaderProgram;
+            gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
+            if (timeLocation) gl.uniform1f(timeLocation, time);
+            if (maxBouncesLocation) gl.uniform1i(maxBouncesLocation, maxBounces);
+            if (ambientStrengthLocation) gl.uniform1f(ambientStrengthLocation, ambientStrength);
 
-    let maxBounces=4; let ambientStrength=0.25;
-    const bounceSlider=document.getElementById('maxBouncesSlider');
-    const ambientSlider=document.getElementById('ambientSlider');
-    const bounceVal=document.getElementById('bounceVal');
-    const ambientVal=document.getElementById('ambientVal');
-    bounceSlider.oninput=(e)=>{maxBounces=parseInt(e.target.value); bounceVal.textContent=maxBounces;}
-    ambientSlider.oninput=(e)=>{ambientStrength=parseFloat(e.target.value); ambientVal.textContent=ambientStrength;}
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-    let startTime=Date.now();
-    function render(){
-        const time=(Date.now()-startTime)/1000.0;
-        gl.viewport(0,0,canvas.width,canvas.height);
-        gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
-        gl.useProgram(program); gl.bindVertexArray(vao);
-        if(resolutionLocation) gl.uniform2f(resolutionLocation,canvas.width,canvas.height);
-        if(timeLocation) gl.uniform1f(timeLocation,time);
-        if(maxBouncesLocation) gl.uniform1i(maxBouncesLocation,maxBounces);
-        if(ambientStrengthLocation) gl.uniform1f(ambientStrengthLocation,ambientStrength);
-        gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+            requestAnimationFrame(render);
+        }
+
         requestAnimationFrame(render);
-    }
-    requestAnimationFrame(render);
-};
+    })();
 </script>
 
 </body>
 </html>
-
